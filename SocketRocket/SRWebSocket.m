@@ -1598,8 +1598,10 @@ static const size_t SRFrameHeaderOverhead = 32;
 
 - (void)setupWithScanner:(stream_scanner)scanner handler:(data_callback)handler bytesNeeded:(size_t)bytesNeeded readToCurrentFrame:(BOOL)readToCurrentFrame unmaskBytes:(BOOL)unmaskBytes;
 {
+#if !__has_feature(objc_arc)
     [_handler release];
     [_scanner release];
+#endif
     _scanner = [scanner copy];
     _handler = [handler copy];
     _bytesNeeded = bytesNeeded;
