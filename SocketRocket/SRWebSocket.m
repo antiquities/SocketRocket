@@ -45,7 +45,7 @@
 #endif
 
 #if !__has_feature(objc_arc) 
-#error SocketRocket muust be compiled with ARC enabled
+//#error SocketRocket muust be compiled with ARC enabled
 #endif
 
 
@@ -293,7 +293,10 @@ static __strong NSData *CRLFCRLF;
         assert(request.URL);
         _url = request.URL;
         _urlRequest = request;
-        
+#if !__has_feature(objc_arc)
+        [_url retain];
+        [_urlRequest retain];
+#endif
         _requestedProtocols = [protocols copy];
         
         [self _SR_commonInit];
@@ -315,6 +318,9 @@ static __strong NSData *CRLFCRLF;
 - (id)initWithURL:(NSURL *)url protocols:(NSArray *)protocols;
 {
     NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];    
+#if !__has_feature(objc_arc)
+    [request autorelease];
+#endif
     return [self initWithURLRequest:request protocols:protocols];
 }
 
@@ -363,8 +369,12 @@ static __strong NSData *CRLFCRLF;
 
 - (void)dealloc
 {
-    _inputStream.delegate = nil;
-    _outputStream.delegate = nil;
+    if (_inputStream != nil) {
+        _inputStream.delegate = nil;
+    }
+    if (_outputStream != nil) {
+        _outputStream.delegate = nil;
+    }
 
     [_inputStream close];
     [_outputStream close];
@@ -381,6 +391,28 @@ static __strong NSData *CRLFCRLF;
         sr_dispatch_release(_delegateDispatchQueue);
         _delegateDispatchQueue = NULL;
     }
+#if !__has_feature(objc_arc)
+    [_delegateOperationQueue release]; // MEMO: Not used.
+    
+    [_inputStream release];
+    [_outputStream release];
+    [_selfRetain release];
+    [_secKey release];
+    [_closeReason release];
+    
+    [_scheduledRunloops release];
+    [_consumerPool release];
+    [_consumers release];
+    [_currentFrameData release];
+    [_outputBuffer release];
+    [_readBuffer release];
+
+    [_requestedProtocols release];
+    [_urlRequest release];
+    [_url release];
+    
+    [super dealloc];
+#endif
 }
 
 #ifndef NDEBUG
@@ -401,6 +433,9 @@ static __strong NSData *CRLFCRLF;
     NSAssert(_readyState == SR_CONNECTING, @"Cannot call -(void)open on SRWebSocket more than once");
 
     _selfRetain = self;
+#if !__has_feature(objc_arc)
+    [_selfRetain retain];
+#endif
     
     [self _connect];
 }
@@ -513,6 +548,9 @@ static __strong NSData *CRLFCRLF;
     NSMutableData *keyBytes = [[NSMutableData alloc] initWithLength:16];
     SecRandomCopyBytes(kSecRandomDefault, keyBytes.length, keyBytes.mutableBytes);
     _secKey = keyBytes.base64Encoding;
+#if !__has_feature(objc_arc)
+    [_secKey retain];
+#endif
     assert([_secKey length] == 24);
     
     CFHTTPMessageSetHeaderFieldValue(request, CFSTR("Upgrade"), CFSTR("websocket"));
@@ -533,6 +571,9 @@ static __strong NSData *CRLFCRLF;
     NSData *message = CFBridgingRelease(CFHTTPMessageCopySerializedMessage(request));
     
     CFRelease(request);
+#if !__has_feature(objc_arc)
+    [keyBytes release];
+#endif
 
     [self _writeData:message];
     [self _readHTTPHeader];
@@ -556,8 +597,16 @@ static __strong NSData *CRLFCRLF;
     
     CFStreamCreatePairWithSocketToHost(NULL, (__bridge CFStringRef)host, port, &readStream, &writeStream);
     
+#if !__has_feature(objc_arc)
+    [_inputStream release];
+    [_outputStream release];
+#endif
     _outputStream = CFBridgingRelease(writeStream);
     _inputStream = CFBridgingRelease(readStream);
+#if !__has_feature(objc_arc)
+    [_outputStream retain];
+    [_inputStream retain];
+#endif
     
     
     if (_secure) {
@@ -577,10 +626,17 @@ static __strong NSData *CRLFCRLF;
         
         [_outputStream setProperty:SSLOptions
                             forKey:(__bridge id)kCFStreamPropertySSLSettings];
+#if !__has_feature(objc_arc)
+        [SSLOptions release];
+#endif
     }
     
-    _inputStream.delegate = self;
-    _outputStream.delegate = self;
+    if (_inputStream != nil) {
+        _inputStream.delegate = self;
+    }
+    if (_outputStream != nil) {
+        _outputStream.delegate = self;
+    }
 }
 
 - (void)_connect;
@@ -657,6 +713,9 @@ static __strong NSData *CRLFCRLF;
         
         
         [self _sendFrameWithOpcode:SROpCodeConnectionClose data:payload];
+#if !__has_feature(objc_arc)
+        [mutablePayload release];
+#endif
     });
 }
 
@@ -683,6 +742,9 @@ static __strong NSData *CRLFCRLF;
             }];
 
             self.readyState = SR_CLOSED;
+#if !__has_feature(objc_arc)
+            [_selfRetain release];
+#endif
             _selfRetain = nil;
 
             SRFastLog(@"Failing with error %@", error.localizedDescription);
@@ -706,7 +768,9 @@ static __strong NSData *CRLFCRLF;
 {
     NSAssert(self.readyState != SR_CONNECTING, @"Invalid State: Cannot call send: until connection is open");
     // TODO: maybe not copy this for performance
+#if 0
     data = [data copy];
+#endif
     dispatch_async(_workQueue, ^{
         if ([data isKindOfClass:[NSString class]]) {
             [self _sendFrameWithOpcode:SROpCodeTextFrame data:[(NSString *)data dataUsingEncoding:NSUTF8StringEncoding]];
@@ -797,6 +861,9 @@ static inline BOOL closeCodeIsValid(int closeCode) {
             return;
         }
         if (dataSize > 2) {
+#if !__has_feature(objc_arc)
+            [_closeReason release];
+#endif
             _closeReason = [[NSString alloc] initWithData:[data subdataWithRange:NSMakeRange(2, dataSize - 2)] encoding:NSUTF8StringEncoding];
             if (!_closeReason) {
                 [self _closeWithProtocolError:@"Close reason MUST be valid UTF-8"];
@@ -850,10 +917,17 @@ static inline BOOL closeCodeIsValid(int closeCode) {
                 return;
             }
             [self _handleMessage:str];
+#if !__has_feature(objc_arc)
+            [str release];
+#endif
             break;
         }
         case SROpCodeBinaryFrame:
+#if 0
             [self _handleMessage:[frameData copy]];
+#else
+            [self _handleMessage:frameData];
+#endif
             break;
         case SROpCodeConnectionClose:
             [self handleCloseWithData:frameData];
@@ -1068,6 +1142,9 @@ static const uint8_t SRPayloadLenMask   = 0x7F;
         _outputBufferOffset += bytesWritten;
         
         if (_outputBufferOffset > 4096 && _outputBufferOffset > (_outputBuffer.length >> 1)) {
+#if !__has_feature(objc_arc)
+            [_outputBuffer release];
+#endif
             _outputBuffer = [[NSMutableData alloc] initWithBytes:(char *)_outputBuffer.bytes + _outputBufferOffset length:_outputBuffer.length - _outputBufferOffset];
             _outputBufferOffset = 0;
         }
@@ -1084,7 +1161,11 @@ static const uint8_t SRPayloadLenMask   = 0x7F;
         [_inputStream close];
         
         
+#if !__has_feature(objc_arc)
+        for (NSArray *runLoop in [[_scheduledRunloops copy] autorelease]) {
+#else
         for (NSArray *runLoop in [_scheduledRunloops copy]) {
+#endif
             [self unscheduleFromRunLoop:[runLoop objectAtIndex:0] forMode:[runLoop objectAtIndex:1]];
         }
         
@@ -1096,6 +1177,9 @@ static const uint8_t SRPayloadLenMask   = 0x7F;
             }];
         }
         
+#if !__has_feature(objc_arc)
+        [_selfRetain release];
+#endif
         _selfRetain = nil;
     }
 }
@@ -1175,6 +1259,9 @@ static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
     }
     
     SRIOConsumer *consumer = [_consumers objectAtIndex:0];
+#if !__has_feature(objc_arc)
+    [consumer retain];
+#endif
     
     size_t bytesNeeded = consumer.bytesNeeded;
     
@@ -1204,6 +1291,9 @@ static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
         
         if (consumer.unmaskBytes) {
             NSMutableData *mutableSlice = [slice mutableCopy];
+#if !__has_feature(objc_arc)
+            mutableSlice = [mutableSlice autorelease];
+#endif
             
             NSUInteger len = mutableSlice.length;
             uint8_t *bytes = mutableSlice.mutableBytes;
@@ -1237,6 +1327,9 @@ static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
                         dispatch_async(_workQueue, ^{
                             [self _disconnect];
                         });
+#if !__has_feature(objc_arc)
+                        [consumer release];
+#endif
                         return didWork;
                     } else {
                         _currentStringScanPosition += valid_utf8_size;
@@ -1260,6 +1353,9 @@ static const char CRLFCRLFBytes[] = {'\r', '\n', '\r', '\n'};
             didWork = YES;
         }
     }
+#if !__has_feature(objc_arc)
+    [consumer release];
+#endif
     return didWork;
 }
 
@@ -1297,6 +1393,9 @@ static const size_t SRFrameHeaderOverhead = 32;
         [self closeWithCode:SRStatusCodeMessageTooBig reason:@"Message too big"];
         return;
     }
+#if !__has_feature(objc_arc)
+    frame = [frame autorelease];
+#endif
     uint8_t *frame_buffer = (uint8_t *)[frame mutableBytes];
     
     // set fin
@@ -1410,7 +1509,11 @@ static const size_t SRFrameHeaderOverhead = 32;
             }
                 
             case NSStreamEventErrorOccurred: {
+#if 0
                 SRFastLog(@"NSStreamEventErrorOccurred %@ %@", aStream, [[aStream streamError] copy]);
+#else
+                SRFastLog(@"NSStreamEventErrorOccurred %@ %@", aStream, [aStream streamError]);
+#endif
                 /// TODO specify error better!
                 [self _failWithError:aStream.streamError];
                 _readBufferOffset = 0;
@@ -1427,6 +1530,9 @@ static const size_t SRFrameHeaderOverhead = 32;
                 } else {
                     if (self.readyState != SR_CLOSED) {
                         self.readyState = SR_CLOSED;
+#if !__has_feature(objc_arc)
+                        [_selfRetain release];
+#endif
                         _selfRetain = nil;
                     }
 
@@ -1492,6 +1598,8 @@ static const size_t SRFrameHeaderOverhead = 32;
 
 - (void)setupWithScanner:(stream_scanner)scanner handler:(data_callback)handler bytesNeeded:(size_t)bytesNeeded readToCurrentFrame:(BOOL)readToCurrentFrame unmaskBytes:(BOOL)unmaskBytes;
 {
+    [_handler release];
+    [_scanner release];
     _scanner = [scanner copy];
     _handler = [handler copy];
     _bytesNeeded = bytesNeeded;
@@ -1500,6 +1608,14 @@ static const size_t SRFrameHeaderOverhead = 32;
     assert(_scanner || _bytesNeeded);
 }
 
+#if !__has_feature(objc_arc)
+- (void)dealloc
+{
+    [_handler release];
+    [_scanner release];
+    [super dealloc];
+}
+#endif
 
 @end
 
@@ -1507,6 +1623,9 @@ static const size_t SRFrameHeaderOverhead = 32;
 @implementation SRIOConsumerPool {
     NSUInteger _poolSize;
     NSMutableArray *_bufferedConsumers;
+#if !__has_feature(objc_arc)
+    NSMutableArray *_tempConsumers;
+#endif
 }
 
 - (id)initWithBufferCapacity:(NSUInteger)poolSize;
@@ -1515,6 +1634,9 @@ static const size_t SRFrameHeaderOverhead = 32;
     if (self) {
         _poolSize = poolSize;
         _bufferedConsumers = [[NSMutableArray alloc] initWithCapacity:poolSize];
+#if !__has_feature(objc_arc)
+        _tempConsumers = [[NSMutableArray alloc] initWithCapacity:poolSize];
+#endif
     }
     return self;
 }
@@ -1524,14 +1646,32 @@ static const size_t SRFrameHeaderOverhead = 32;
     return [self initWithBufferCapacity:8];
 }
 
+#if !__has_feature(objc_arc)
+- (void)dealloc
+{
+    [_tempConsumers release];
+    [_bufferedConsumers release];
+    [super dealloc];
+}
+#endif
+
 - (SRIOConsumer *)consumerWithScanner:(stream_scanner)scanner handler:(data_callback)handler bytesNeeded:(size_t)bytesNeeded readToCurrentFrame:(BOOL)readToCurrentFrame unmaskBytes:(BOOL)unmaskBytes;
 {
+#if !__has_feature(objc_arc)
+    [_tempConsumers removeAllObjects];
+#endif
     SRIOConsumer *consumer = nil;
     if (_bufferedConsumers.count) {
         consumer = [_bufferedConsumers lastObject];
+#if !__has_feature(objc_arc)
+        [_tempConsumers addObject:consumer]; // MEMO: Don't dealloc until next call.
+#endif
         [_bufferedConsumers removeLastObject];
     } else {
         consumer = [[SRIOConsumer alloc] init];
+#if !__has_feature(objc_arc)
+        [consumer autorelease];
+#endif
     }
     
     [consumer setupWithScanner:scanner handler:handler bytesNeeded:bytesNeeded readToCurrentFrame:readToCurrentFrame unmaskBytes:unmaskBytes];
@@ -1541,6 +1681,9 @@ static const size_t SRFrameHeaderOverhead = 32;
 
 - (void)returnConsumer:(SRIOConsumer *)consumer;
 {
+#if !__has_feature(objc_arc)
+    [_tempConsumers removeAllObjects];
+#endif
     if (_bufferedConsumers.count < _poolSize) {
         [_bufferedConsumers addObject:consumer];
     }
@@ -1605,6 +1748,9 @@ static inline void SRFastLog(NSString *format, ...)  {
     va_end(arg_list);
     
     NSLog(@"[SR] %@", formattedString);
+#if !__has_feature(objc_arc)
+    [formattedString release];
+#endif
 #endif
 }
 
@@ -1651,7 +1797,11 @@ static inline int32_t validate_dispatch_data_partial_string(NSData *data) {
         }
     }
     
+#if !__has_feature(objc_arc)
+    if (size != -1 && ![[[NSString alloc] initWithBytesNoCopy:(char *)[data bytes] length:size encoding:NSUTF8StringEncoding freeWhenDone:NO] autorelease]) {
+#else
     if (size != -1 && ![[NSString alloc] initWithBytesNoCopy:(char *)[data bytes] length:size encoding:NSUTF8StringEncoding freeWhenDone:NO]) {
+#endif
         size = -1;
     }
     
@@ -1666,6 +1816,9 @@ static inline int32_t validate_dispatch_data_partial_string(NSData *data) {
     
     for (int i = 0; i < maxCodepointSize; i++) {
         NSString *str = [[NSString alloc] initWithBytesNoCopy:(char *)data.bytes length:data.length - i encoding:NSUTF8StringEncoding freeWhenDone:NO];
+#if !__has_feature(objc_arc)
+        [str autorelease];
+#endif
         if (str) {
             return data.length - i;
         }
@@ -1705,6 +1858,9 @@ static NSRunLoop *networkRunLoop = nil;
 - (void)dealloc
 {
     sr_dispatch_release(_waitGroup);
+#if !__has_feature(objc_arc)
+    [super dealloc];
+#endif
 }
 
 - (id)init
@@ -1725,6 +1881,9 @@ static NSRunLoop *networkRunLoop = nil;
         
         NSTimer *timer = [[NSTimer alloc] initWithFireDate:[NSDate distantFuture] interval:0.0 target:nil selector:nil userInfo:nil repeats:NO];
         [_runLoop addTimer:timer forMode:NSDefaultRunLoopMode];
+#if !__has_feature(objc_arc)
+        [timer release];
+#endif
         
         while ([_runLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]]) {
             
